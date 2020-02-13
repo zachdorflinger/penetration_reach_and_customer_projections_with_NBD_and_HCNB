@@ -1,0 +1,271 @@
+---
+title: "APM - HW 3"
+author: "Brian Bates, Zach Dorflinger, Kristina Paterson, Chris Stocks"
+date: "2/13/2020"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r, include=F, warning=F}
+library(dplyr)
+library(xtable)
+library(tidyr)
+library(knitr)
+library(kableExtra)
+library(BTYD)
+library(scales)
+library(tidyverse)
+library(ggridges)
+library(broom)
+
+options(digits = 3)
+options(xtable.comment = F)
+```
+
+### Question 1
+
+```{r}
+#create given parameter estimate table
+NBD_cof <- data.frame("r" = .181, "a" = .059)
+NBD_HCNB_cof <- data.frame("r" = .181, "a" = .059, "pi" = .551)
+
+#penetration for NBD
+pen <- function(r, a, t) {
+    return(1 - (a/(a+t))^r)
+}
+
+#penetration for HCNB
+pen_HCNB <- function(r, a, t, pi) {
+    return(((1-pi ) * (1 - (a/(a+t))^r)))
+}
+
+t_list <- seq(0,30,1)
+
+#1a
+NBD_penetration_1 <- pen(r = NBD_cof$r, a = NBD_cof$a, t=1)
+NBD_penetration_5 <- pen(r = NBD_cof$r, a = NBD_cof$a, t=5)
+NBD_penetration_26 <- pen(r = NBD_cof$r, a = NBD_cof$a, t=26)
+
+NBD_penetration <- as.data.frame(pen(r = NBD_cof$r, a = NBD_cof$a, t=t_list))
+NBD_penetration_graph <- add_column(NBD_penetration, t_list) %>%
+    rename('Penetration' = 1) 
+    
+NBD_penetration_graph %>% 
+    ggplot(aes(x=t_list, y=Penetration)) +
+    geom_line() +
+    scale_x_continuous(expression("t"), breaks=seq(0,30,5)) +
+    scale_y_continuous(expression("Penetration %"), breaks=seq(0,1,.1), limits = c(0,1)) +
+    ggtitle('NBD Penetration Over t Periods') +
+    geom_vline(xintercept=1, linetype=1) +
+    geom_vline(xintercept=5, linetype=2) +
+    geom_vline(xintercept=26, linetype=3)
+    
+NBD_HCNB_penetration_1 <- pen_HCNB(r = NBD_HCNB_cof$r, a = NBD_HCNB_cof$a, t=1, pi=.551)
+NBD_HCNB_penetration_5 <- pen_HCNB(r = NBD_HCNB_cof$r, a = NBD_HCNB_cof$a, t=5, pi=.551)
+NBD_HCNB_penetration_26 <- pen_HCNB(r = NBD_HCNB_cof$r, a = NBD_HCNB_cof$a, t=26, pi=.551)
+
+NBD_HCNB_penetration <- as.data.frame(pen_HCNB(r = NBD_HCNB_cof$r, a = NBD_HCNB_cof$a, t=t_list, pi=NBD_HCNB_cof$pi)) 
+NBD_HCNB_penetration_graph <- add_column(NBD_HCNB_penetration, t_list) %>%
+    rename('Penetration' = 1) 
+
+NBD_HCNB_penetration_graph %>% 
+    ggplot(aes(x=t_list, y=Penetration)) +
+    geom_line() +
+    scale_x_continuous(expression("t"), breaks=seq(0,30,5)) +
+    scale_y_continuous(expression("Penetration %"), breaks=seq(0,1,.1), limits = c(0,1)) +
+    ggtitle('NBD w/ HCNB Penetration Over t Periods') +
+    geom_vline(xintercept=1, linetype=1) +
+    geom_vline(xintercept=5, linetype=2) +
+    geom_vline(xintercept=26, linetype=3)
+```
+
+#### 1A)
+
+The NBD model predicts:  
+
+*  `r round(NBD_penetration_1*100, 1)`% penetration after 1 period
+*  `r round(NBD_penetration_5*100, 1)`% penetration after 5 periods
+*  `r round(NBD_penetration_26*100, 1)`% penetration after 26 periods
+
+The NBD with HCNB model predicts:  
+
+*  `r round(NBD_HCNB_penetration_1*100, 1)`% penetration after 1 period
+*  `r round(NBD_HCNB_penetration_5*100, 1)`% penetration after 5 periods
+*  `r round(NBD_HCNB_penetration_26*100, 1)`% penetration after 26 periods
+
+#### 1B)
+
+I would tell my manager to expect a maximum penetration of 45%, because if 55% of the population is a hard core never buyer, than we can never increase above that threshold.
+
+### Question 2
+```{r}
+nbd_prob <- function(x, r, a, t) {
+    (gamma(r + x) / (gamma(r) * factorial(x))) *
+        ((a / (a + t))^r) *
+        ((t / (a + t))^x)
+}
+
+# Custom log likelihood function for #2
+ll_nbd_2 <- function(pars, resp_vector, t) {
+    r <- pars[1]
+    a <- pars[2]
+
+    probs <- rep(NA, 5)
+    probs[1] <- nbd_prob(0, r, a, t)
+    probs[2] <- nbd_prob(1, r, a, t)
+    probs[3] <- nbd_prob(2, r, a, t)
+    probs[4] <- nbd_prob(3, r, a, t) + nbd_prob(4, r, a, t) + nbd_prob(5, r, a, t)
+    prob_under6 <- sum(probs, na.rm = T)
+    probs[5] <- 1 - prob_under6
+
+    ll <- sum(log(probs) * resp_vector)
+    return(-ll)
+}
+
+# Responses vector from HW#2
+responses <- c(1020, 166, 270, 279, 130)
+
+# Optimization
+pars = c(.5, .5)
+opt_nbd_2 <- optim(pars, fn = ll_nbd_2, resp_vector = responses, t = 1)
+
+# Predictions for x:0-10
+pred_data <- data.frame(x=0:10)
+pred_data$pred <- nbd_prob(pred_data$x, opt_nbd_2$par[1], opt_nbd_2$par[2], 1) * sum(responses)
+
+kable(pred_data) %>% 
+    kable_styling(full_width = FALSE, bootstrap_options = c("striped", "hover"))
+```
+
+Parameter estimates: 
+
+* r: `r opt_nbd_2$par[1]`
+* a: `r opt_nbd_2$par[2]`
+* Avg surveys: `r round(opt_nbd_2$par[1]/opt_nbd_2$par[2], 1)`
+
+According to our model, the average respondent in the data completes roughly
+`r round(opt_nbd_2$par[1]/opt_nbd_2$par[2], 1)` surveys. However, a large 
+proportion of respondents are expected to complete no surveys at all: 
+`r pred_data[1, 2]` or `r pred_data[1, 2] / 1865`% of the sample.
+
+
+###3
+```{r}
+data <- read.csv("./khakichinos.txt", header = T, sep = "") %>% 
+    select(c(ID, Visits))
+
+# From slide 21
+nbd_prob <- function(x, r, a, t) {
+    (gamma(r + x) / (gamma(r) * factorial(x))) *
+        ((a / (a + t))^r) *
+        ((t / (a + t))^x)
+}
+
+# Custom log likelihood function for #3
+ll_nbd_3 <- function(pars, x_vector, t) {
+    r <- pars[1]
+    a <- pars[2]
+    
+    prob_vector <- nbd_prob(x_vector, r, a, t)
+    
+    ll <- sum(log(prob_vector))
+    return(-ll)
+}
+
+# Estimate model
+pars = c(.5, .5)
+opt_nbd_3 <- optim(pars, fn = ll_nbd_3, x_vector = data$Visits, t = 1)
+
+# Parameter interpretation
+r <- opt_nbd_3$par[1]
+a <- opt_nbd_3$par[2]
+exp_x <- r/a
+
+# Reach function
+reach <- function(r, a, t) {
+    1 - ((a/(a + t))^r)
+}
+
+# Reach for x:0-36
+reach_data <- data.frame(t=0:36)
+reach_data$reach <- reach(r, a, reach_data$t) * 100
+```
+
+#### A)
+
+The parameters of the fitted NBD model (r: `r r`, a: `r a`) imply that a large 
+portion of the internet users in the data will not visit (or will virtually 
+never visit) khakichinos.com. A relatively small portion of the userbase will
+visit the site many times.
+
+#### B)
+
+```{r}
+# Plot it
+ggplot(data = reach_data, aes(x = t, y = reach)) +
+    geom_line(color = "turquoise") +
+    geom_point(color = "turquoise4") +
+    scale_y_continuous(name = "Reach (%)", breaks = seq(0, 100, 20), limits = c(0, 100)) +
+    scale_x_continuous(name = "Time (Months)", breaks = seq(0, 36, 6), limits = c(0, 36)) +
+    ggtitle("Khakichinos Reach over Time")
+
+# Value at 12
+v12 <- reach_data[13, "reach"]
+```
+
+At 12 periods, an expected `r round(v12, 1)`% of potential users will have 
+visited khakichinos.com at least once.
+
+
+###4
+
+4a.
+
+$E(\lambda) = \frac{r}{α}$
+
+4b. 
+Prior = $g(\lambda | r,a) = \frac{a^r}{\gamma(r)}\lambda^{r-1}e^{-a\lambda}$
+
+Conditional Likelihood = $P(X(T) = x | \lambda) = \frac{(\lambda T)^{x}e^{-\lambda T}}{x!}$
+
+Marginal Likelihood = $\frac{\gamma (r+x)}{\gamma(r)x!}(\frac{a}{a+T})^r(\frac{T}{a+T})^x$
+
+$Posterior = Prior\frac{Conditional}{Marginal}$
+
+Posterior = $\frac{(a+T)^{r+x}}{\gamma(r+x)}\lambda^{r-1+x}e^{-(a\lambda + T\lambda)}$
+
+Bayes update: add $T$ to $a$ and add $x$ to $r$
+
+4c.
+```{r}
+kc_data <- data.frame(
+  User = c('A','B','C','D','E'),
+  Month1 = c(0,2,0,0,6),
+  Month2=c(0,0,5,0,5),
+  Month3=c(0,0,4,1,4),
+  Month4=c(0,0,0,0,0),
+  Month5=c(0,0,0,0,0),
+  Month6=c(0,0,0,0,0),
+  Month7=c(0,0,0,0,0))
+
+
+
+for (i in 5:8) {
+  for(j in 1:nrow(kc_data)){
+    kc_data[j,i] <- (r+sum(kc_data[j,2:4]))/(a+3)
+  }
+}
+
+kc_data <- kc_data %>% mutate(Month6and7 = kc_data$Month6 + kc_data$Month7)
+kc_data <- kc_data[,c(1:6,9)]
+
+kable(kc_data) %>% 
+    kable_styling(full_width = FALSE, bootstrap_options = c("striped", "hover"))
+
+```
+
+
+
+
+
